@@ -1,0 +1,84 @@
+name: Enable GitHub Pages
+
+on:
+  push:
+    branches:
+      - cursor/concrete-stack-pages-a38f
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  enable-legacy:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+      build_type: ${{ steps.check.outputs.build_type }}
+      html_url: ${{ steps.check.outputs.html_url }}
+    steps:
+      - name: Enable legacy Pages from master root
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          echo "POST /pages"
+          gh api --method POST repos/${{ github.repository }}/pages \
+            --input - <<'EOF'
+          {
+            "build_type": "legacy",
+            "source": {
+              "branch": "master",
+              "path": "/"
+            }
+          }
+          EOF
+          echo "PUT /pages"
+          gh api --method PUT repos/${{ github.repository }}/pages \
+            --input - <<'EOF'
+          {
+            "build_type": "legacy",
+            "source": {
+              "branch": "master",
+              "path": "/"
+            }
+          }
+          EOF
+          exit 0
+      - name: Read Pages configuration
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api repos/${{ github.repository }}/pages > /tmp/pages.json; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "build_type=$(jq -r '.build_type // empty' /tmp/pages.json)" >> "$GITHUB_OUTPUT"
+            echo "html_url=$(jq -r '.html_url // empty' /tmp/pages.json)" >> "$GITHUB_OUTPUT"
+            cat /tmp/pages.json
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "build_type=" >> "$GITHUB_OUTPUT"
+            echo "html_url=" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-fallback:
+    needs: enable-legacy
+    if: needs.enable-legacy.outputs.enabled != 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
